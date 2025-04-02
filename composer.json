@@ -1,0 +1,27 @@
+{
+    "name": "ua0leg/novaposhta-php-api",
+    "description": "PHP клієнт для роботи з API Нової Пошти",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Oleg Dev",
+            "email": "9407674@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "ext-curl": "*",
+        "ext-json": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "ua0leg\\novaposhta\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "ua0leg\\novaposhta\\tests\\": "tests/"
+        }
+    }
+}
