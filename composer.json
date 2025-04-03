@@ -16,12 +16,12 @@
     },
     "autoload": {
         "psr-4": {
-            "ua0leg\\novaposhta\\": "src/"
+            "Ua0leg\\Novaposhta\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "ua0leg\\novaposhta\\tests\\": "tests/"
+            "ua0leg\\Novaposhta\\tests\\": "tests/"
         }
     }
 }
