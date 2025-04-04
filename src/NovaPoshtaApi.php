@@ -2,12 +2,18 @@
 
 namespace Ua0leg\Novaposhta;
 
+use Psr\Http\Client\ClientInterface;
+use Psr\Http\Message\RequestFactoryInterface;
+use Psr\Http\Message\StreamFactoryInterface;
 use Ua0leg\Novaposhta\Exceptions\NovaPoshtaException;
 
 class NovaPoshtaApi implements NovaPoshtaApiInterface
 {
     private string $apiKey;
     private string $apiUrl = 'https://api.novaposhta.ua/v2.0/json/';
+    private ClientInterface $httpClient;
+    private RequestFactoryInterface $requestFactory;
+    private StreamFactoryInterface $streamFactory;
 
     // Типи контрагента
     const COUNTERPARTY_SENDER = 'Sender';
@@ -27,64 +33,118 @@ class NovaPoshtaApi implements NovaPoshtaApiInterface
     const CARGO_TYPE_DOCUMENTS = 'Documents';
     const CARGO_TYPE_PALLET = 'Pallet';
 
-    public function __construct($apiKey)
-    {
+    public function __construct(
+        string $apiKey,
+        ?ClientInterface $httpClient = null,
+        ?RequestFactoryInterface $requestFactory = null,
+        ?StreamFactoryInterface $streamFactory = null
+    ) {
         $this->apiKey = $apiKey;
+        $this->httpClient = $httpClient ?? $this->createDefaultHttpClient();
+        $this->requestFactory = $requestFactory ?? $this->createDefaultRequestFactory();
+        $this->streamFactory = $streamFactory ?? $this->createDefaultStreamFactory();
     }
 
-    /**
-     * Відправляє запит до API Нової Пошти
-     *
-     * @param array $requestData Дані для запиту
-     * @return array
-     * @throws NovaPoshtaException
-     */
-    private function sendRequest(array $requestData): array
+    protected function sendRequest(array $requestData): array
     {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $this->apiUrl);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        try {
+            $request = $this->requestFactory->createRequest(
+                'POST',
+                $this->apiUrl
+            )->withHeader('Content-Type', 'application/json');
 
-        $response = curl_exec($ch);
-        $curlError = curl_error($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+            $stream = $this->streamFactory->createStream(
+                json_encode($requestData)
+            );
 
-        // Обробка помилок cURL
-        if ($curlError) {
+            $request = $request->withBody($stream);
+
+            $response = $this->httpClient->sendRequest($request);
+
+            if ($response->getStatusCode() !== 200) {
+                throw new NovaPoshtaException(
+                    "HTTP error: " . $response->getStatusCode()
+                );
+            }
+
+            $responseData = json_decode($response->getBody(), true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new NovaPoshtaException(
+                    "JSON decode error: " . json_last_error_msg()
+                );
+            }
+
+            return $responseData;
+
+        } catch (\Psr\Http\Client\ClientExceptionInterface $e) {
             throw new NovaPoshtaException(
-                "cURL Error: {$curlError}",
-                $httpCode ?: 500
+                "HTTP client error: " . $e->getMessage(),
+                $e->getCode(),
+                $e
             );
         }
+    }
 
-        // Декодування JSON
-        $decodedResponse = json_decode($response, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new NovaPoshtaException(
-                "JSON decode error: " . json_last_error_msg(),
-                500
-            );
-        }
+    private function createDefaultHttpClient(): ClientInterface
+    {
+        return new class implements ClientInterface {
+            public function sendRequest(\Psr\Http\Message\RequestInterface $request): \Psr\Http\Message\ResponseInterface
+            {
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_URL, (string)$request->getUri());
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, $request->getHeaders());
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, (string)$request->getBody());
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 
-        // Обробка помилок API Нової Пошти
-        if (empty($decodedResponse['success'])) {
-            $errorMessage = !empty($decodedResponse['errors'])
-                ? implode(', ', $decodedResponse['errors'])
-                : 'Unknown API error';
+                $response = curl_exec($ch);
+                $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $error = curl_error($ch);
+                curl_close($ch);
 
-            throw new NovaPoshtaException(
-                "API Error: {$errorMessage}",
-                $httpCode,
-                $decodedResponse['errorCodes'][0] ?? null
-            );
-        }
+                if ($error) {
+                    throw new \RuntimeException($error);
+                }
 
-        return $decodedResponse;
+                return new \GuzzleHttp\Psr7\Response(
+                    $statusCode,
+                    [],
+                    $response
+                );
+            }
+        };
+    }
+
+    private function createDefaultRequestFactory(): RequestFactoryInterface
+    {
+        return new class implements RequestFactoryInterface {
+            public function createRequest(string $method, $uri): \Psr\Http\Message\RequestInterface
+            {
+                return new \GuzzleHttp\Psr7\Request($method, $uri);
+            }
+        };
+    }
+
+    private function createDefaultStreamFactory(): StreamFactoryInterface
+    {
+        return new class implements StreamFactoryInterface {
+            public function createStream(string $content = ''): \Psr\Http\Message\StreamInterface
+            {
+                return \GuzzleHttp\Psr7\Utils::streamFor($content);
+            }
+
+            public function createStreamFromFile(string $filename, string $mode = 'r'): \Psr\Http\Message\StreamInterface
+            {
+                return \GuzzleHttp\Psr7\Utils::streamFor(fopen($filename, $mode));
+            }
+
+            public function createStreamFromResource($resource): \Psr\Http\Message\StreamInterface
+            {
+                return \GuzzleHttp\Psr7\Utils::streamFor($resource);
+            }
+        };
     }
 
     /**
@@ -98,6 +158,10 @@ class NovaPoshtaApi implements NovaPoshtaApiInterface
      */
     public function searchSettlements(string $cityName, int $limit = 50, int $page = 1): array
     {
+        if (empty($cityName)) {
+            throw new \InvalidArgumentException('City name cannot be empty');
+        }
+
         $requestData = [
             'apiKey'           => $this->apiKey,
             'modelName'        => 'AddressGeneral',
@@ -124,26 +188,26 @@ class NovaPoshtaApi implements NovaPoshtaApiInterface
     /**
      * Отримання списку відділень/поштоматів
      *
-     * @param string|null $cityName Назва міста (необов'язково)
-     * @param string|null $cityRef Ref міста (необов'язково)
-     * @param string|null $findByString Пошуковий рядок (необов'язково)
-     * @param int $page Номер сторінки (за замовчуванням 1)
-     * @param int $limit Ліміт результатів (за замовчуванням 50)
-     * @param string $language Мова (UA/RU, за замовчуванням UA)
-     * @param string|null $typeOfWarehouseRef Тип відділення (необов'язково)
-     * @param string|null $warehouseId ID відділення (необов'язково)
+     * @param string|null $cityName Назва міста
+     * @param string|null $cityRef Ref міста
+     * @param string|null $findByString Пошуковий рядок
+     * @param int $page Номер сторінки
+     * @param int $limit Ліміт результатів
+     * @param string $language Мова
+     * @param string|null $typeOfWarehouseRef Тип відділення
+     * @param string|null $warehouseId ID відділення
      * @return array
      * @throws NovaPoshtaException
      */
     public function getWarehouses(
-        string $cityName = null,
-        string $cityRef = null,
-        string $findByString = null,
-        int    $page = 1,
-        int    $limit = 50,
+        ?string $cityName = null,
+        ?string $cityRef = null,
+        ?string $findByString = null,
+        int $page = 1,
+        int $limit = 50,
         string $language = 'UA',
-        string $typeOfWarehouseRef = null,
-        string $warehouseId = null
+        ?string $typeOfWarehouseRef = null,
+        ?string $warehouseId = null
     ): array
     {
         $methodProperties = [

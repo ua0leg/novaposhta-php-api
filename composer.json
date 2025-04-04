@@ -14,6 +14,13 @@
         "ext-curl": "*",
         "ext-json": "*"
     },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5",
+        "php-http/mock-client": "^1.6",
+        "psr/http-client": "^1.0",
+        "psr/http-factory": "^1.1",
+        "guzzlehttp/guzzle": "^7.9"
+    },
     "autoload": {
         "psr-4": {
             "Ua0leg\\Novaposhta\\": "src/"
@@ -22,6 +29,11 @@
     "autoload-dev": {
         "psr-4": {
             "ua0leg\\Novaposhta\\tests\\": "tests/"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true
         }
     }
 }
